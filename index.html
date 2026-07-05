@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Web Tabla — Play Tabla in Your Browser</title>
+<meta name="description" content="A playable tabla instrument in your browser. Trigger authentic bols from your computer keyboard, record loops, and jam along to classic taals." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ============ SPLASH SCREEN ============ -->
+<div id="splash-screen" role="status" aria-live="polite">
+  <div class="splash-inner">
+    <div class="splash-rings" aria-hidden="true">
+      <span class="ring ring-1"></span>
+      <span class="ring ring-2"></span>
+      <span class="ring ring-3"></span>
+    </div>
+    <h1 class="splash-title"><span class="devanagari">तबला</span> Web Tabla</h1>
+    <p class="splash-sub">Tuning the membranes…</p>
+    <div class="splash-progress-track">
+      <div class="splash-progress-fill" id="splash-progress-fill"></div>
+    </div>
+    <p class="splash-hint" id="splash-hint">Loading audio engine…</p>
+  </div>
+</div>
+
+<!-- ============ SKIP LINK (a11y) ============ -->
+<a class="skip-link" href="#stage">Skip to instrument</a>
+
+<div id="app" aria-hidden="true">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="34" height="34">
+          <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <circle cx="24" cy="24" r="12" fill="currentColor" opacity="0.18"/>
+          <circle cx="24" cy="24" r="4" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">Web Tabla</span>
+        <span class="brand-sub">play · record · loop</span>
+      </div>
+    </div>
+
+    <div class="topbar-controls" role="group" aria-label="Global controls">
+      <div class="control-chip" title="Adjust global tempo used by the metronome and pattern player">
+        <label for="bpm-input">BPM</label>
+        <button class="chip-btn" id="bpm-down" aria-label="Decrease BPM">−</button>
+        <input id="bpm-input" type="number" min="30" max="250" value="100" inputmode="numeric" aria-label="Beats per minute"/>
+        <button class="chip-btn" id="bpm-up" aria-label="Increase BPM">+</button>
+      </div>
+
+      <button class="icon-btn" id="btn-metronome" aria-pressed="false" aria-label="Start metronome" title="Metronome (start/stop)">
+        <span id="metro-dot" aria-hidden="true">◐</span>
+      </button>
+
+      <div class="control-chip control-slider" title="Overall output volume">
+        <label for="volume-slider">Vol</label>
+        <input id="volume-slider" type="range" min="0" max="100" value="85" aria-label="Volume"/>
+      </div>
+
+      <div class="control-chip control-slider" title="Master gain / output trim">
+        <label for="gain-slider">Gain</label>
+        <input id="gain-slider" type="range" min="0" max="150" value="100" aria-label="Master gain"/>
+      </div>
+
+      <button class="icon-btn" id="btn-help" aria-label="Show keyboard mapping (?)" title="Keyboard mapping (?)">?</button>
+      <button class="icon-btn" id="btn-settings" aria-label="Open settings" title="Settings">⚙</button>
+      <button class="icon-btn" id="btn-fullscreen" aria-label="Toggle fullscreen" title="Fullscreen">⛶</button>
+      <button class="icon-btn" id="btn-screenshot" aria-label="Screenshot mode" title="Screenshot mode">📷</button>
+    </div>
+  </header>
+
+  <!-- ============ DIAGNOSTICS OVERLAY ============ -->
+  <div id="diagnostics" aria-hidden="true">
+    <span>FPS: <b id="fps-value">--</b></span>
+    <span>Latency: <b id="latency-value">--</b> ms</span>
+    <span>Voices: <b id="voices-value">0</b></span>
+  </div>
+
+  <!-- ============ MAIN STAGE ============ -->
+  <main id="stage">
+
+    <section class="drum-stage" aria-label="Tabla instrument">
+      <div class="bol-callout" id="bol-callout" aria-live="polite"></div>
+
+      <div class="drum-wrap" id="drum-bayan-wrap">
+        <div class="drum-label">Bayan <span>(bass drum)</span></div>
+        <div class="drum bayan" id="drum-bayan" tabindex="0" role="button" aria-label="Bayan drum — press Q W E R, Shift">
+          <div class="drum-ring outer"></div>
+          <div class="drum-ring mid"></div>
+          <div class="drum-skin">
+            <div class="drum-syahi"></div>
+          </div>
+          <div class="ripple-layer" aria-hidden="true"></div>
+          <div class="glow-layer" aria-hidden="true"></div>
+        </div>
+        <div class="drum-keys" id="bayan-keys" aria-hidden="true"></div>
+      </div>
+
+      <div class="drum-wrap" id="drum-dayan-wrap">
+        <div class="drum-label">Dayan <span>(treble drum)</span></div>
+        <div class="drum dayan" id="drum-dayan" tabindex="0" role="button" aria-label="Dayan drum — press A S D F, Z X C V, Ctrl">
+          <div class="drum-ring outer"></div>
+          <div class="drum-ring mid"></div>
+          <div class="drum-skin">
+            <div class="drum-syahi"></div>
+          </div>
+          <div class="ripple-layer" aria-hidden="true"></div>
+          <div class="glow-layer" aria-hidden="true"></div>
+        </div>
+        <div class="drum-keys" id="dayan-keys" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <canvas id="waveform" height="80" aria-hidden="true"></canvas>
+
+    <!-- ============ TABS: RECORDER / PATTERNS ============ -->
+    <section class="panel-tabs" aria-label="Tools">
+      <div class="tab-bar" role="tablist">
+        <button class="tab-btn active" role="tab" aria-selected="true" data-tab="recorder">Loop Recorder</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="patterns">Pattern Mode</button>
+        <button class="tab-btn" role="tab" aria-selected="false" data-tab="remap">Remap Keys</button>
+      </div>
+
+      <div class="tab-panel active" id="panel-recorder" role="tabpanel">
+        <div class="panel-row">
+          <button class="btn btn-accent" id="rec-toggle" aria-pressed="false">
+            <span class="rec-dot" aria-hidden="true"></span> Record
+          </button>
+          <button class="btn" id="rec-play" disabled>▶ Play</button>
+          <button class="btn" id="rec-stop" disabled>■ Stop</button>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="rec-loop" /> Loop
+          </label>
+          <div class="spacer"></div>
+          <button class="btn btn-ghost" id="rec-download" disabled>⭳ Download JSON</button>
+          <label class="btn btn-ghost file-btn">
+            ⭱ Load
+            <input type="file" id="rec-upload" accept="application/json" hidden />
+          </label>
+          <button class="btn btn-ghost" id="rec-clear" disabled>Clear</button>
+        </div>
+        <div class="rec-status" id="rec-status">No recording yet. Hit Record, then play some bols.</div>
+        <div class="rec-timeline" id="rec-timeline" aria-hidden="true"></div>
+      </div>
+
+      <div class="tab-panel" id="panel-patterns" role="tabpanel" hidden>
+        <div class="panel-row">
+          <select id="pattern-select" aria-label="Choose a taal pattern">
+            <option value="">— Choose a taal —</option>
+          </select>
+          <button class="btn btn-accent" id="pattern-play">▶ Play</button>
+          <button class="btn" id="pattern-pause" disabled>⏸ Pause</button>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="pattern-loop" checked /> Loop
+          </label>
+        </div>
+        <p class="pattern-desc" id="pattern-desc">Pick a taal to see its theka (basic pattern) and play along.</p>
+        <div class="pattern-grid" id="pattern-grid" aria-hidden="true"></div>
+      </div>
+
+      <div class="tab-panel" id="panel-remap" role="tabpanel" hidden>
+        <p class="panel-hint">Click a row, then press any key to bind it to that bol.</p>
+        <div class="remap-grid" id="remap-grid"></div>
+        <div class="panel-row">
+          <button class="btn btn-ghost" id="remap-reset">Reset to defaults</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span>Web Tabla — click anywhere or press a key to begin. Press <kbd>?</kbd> for help.</span>
+  </footer>
+</div>
+
+<!-- ============ HELP / KEYBOARD MAPPING MODAL ============ -->
+<div class="modal-overlay" id="help-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="modal-head">
+      <h2 id="help-title">Keyboard Mapping</h2>
+      <button class="icon-btn" id="help-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="help-columns" id="help-columns"></div>
+      <p class="help-footnote">Bindings are remappable — see the <b>Remap Keys</b> tab. Press <kbd>Esc</kbd> to close this dialog.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div class="modal-overlay" id="settings-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="icon-btn" id="settings-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body settings-body">
+      <label class="settings-row">
+        <span>Theme</span>
+        <select id="setting-theme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+      <label class="settings-row">
+        <span>Animations</span>
+        <input type="checkbox" id="setting-animations" checked />
+      </label>
+      <label class="settings-row">
+        <span>Keyboard overlay on drums</span>
+        <input type="checkbox" id="setting-overlay" checked />
+      </label>
+      <label class="settings-row">
+        <span>Show FPS / latency diagnostics</span>
+        <input type="checkbox" id="setting-diagnostics" />
+      </label>
+      <label class="settings-row">
+        <span>Playback rate (pitch)</span>
+        <input type="range" id="setting-rate" min="0.75" max="1.25" step="0.01" value="1" />
+      </label>
+      <div class="settings-row" id="midi-status-row">
+        <span>MIDI device</span>
+        <span id="midi-status">Checking…</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast for small notifications -->
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
