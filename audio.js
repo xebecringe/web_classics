@@ -73,13 +73,19 @@ class SoundPool {
  */
 export class AudioEngine {
   constructor() {
-    this.ctx = null;
-    this.masterGain = null;
-    this.analyser = null;
-    this.pool = null;
-    this.playbackRate = 1;
-    this.ready = false;
-    this._activeVoices = 0;
+      this.ctx = null;
+      this.masterGain = null;
+      this.analyser = null;
+      this.pool = null;
+
+      // NEW
+      this.sampleBuffers = new Map();
+      this.sampleMap = new Map();
+      this.samplesLoaded = false;
+
+      this.playbackRate = 1;
+      this.ready = false;
+      this._activeVoices = 0;
   }
 
   /** Must be called from a user gesture (click/keydown) to satisfy autoplay policies. */
@@ -104,8 +110,11 @@ export class AudioEngine {
     this.masterGain.connect(this.trimGain);
     this.trimGain.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
-
+      
     this.pool = new SoundPool(this.ctx);
+
+    await this.loadSamples();
+
     this.ready = true;
   }
 
@@ -138,6 +147,27 @@ export class AudioEngine {
     if (!this.ready) return null;
     const recipe = BOL_LIBRARY[name];
     if (!recipe) return null;
+
+    // ------------------------------------------------------
+    // Sample playback
+    // ------------------------------------------------------
+
+    if (this.samplesLoaded) {
+
+        const sample = this.randomSample(name);
+
+        if (sample) {
+
+            const played = this.playSample(sample, velocity);
+
+            if (played) {
+                return this.ctx.currentTime;
+            }
+
+        }
+
+    }
+
 
     const now = this.ctx.currentTime;
     const rate = this.playbackRate;
@@ -232,6 +262,109 @@ export class AudioEngine {
     }, cleanupDelay);
 
     return now;
+  }
+
+  /* ============================================================
+    SAMPLE ENGINE
+  ============================================================ */
+
+  async loadSamples() {
+
+      const files = [
+          "dhec",
+          "ghe","ghe_2","ghe_3","ghe_4","ghe_5","ghe_6","ghe_7","ghe_8",
+          "ke","ke_2","ke_3",
+          "na","na-open","na_sharp",
+          "re",
+          "tas","tas_2","tas_3",
+          "te","te_2","te_middlefinger","te_ne",
+          "tun","tun_2","tun_3"
+      ];
+
+      for (const name of files) {
+
+          try {
+
+              const response = await fetch(`assets/samples/${name}.wav`);
+
+              if (!response.ok) continue;
+
+              const buffer = await response.arrayBuffer();
+
+              const audioBuffer =
+                  await this.ctx.decodeAudioData(buffer);
+
+              this.sampleBuffers.set(name, audioBuffer);
+
+          }
+
+          catch (err) {
+
+              console.warn("Couldn't load sample:", name);
+
+          }
+
+      }
+
+      this.sampleMap.set("Na", ["na","na-open","na_sharp"]);
+      this.sampleMap.set("Ge", ["ghe"]);
+      this.sampleMap.set("Ghe", ["ghe","ghe_2","ghe_3","ghe_4","ghe_5","ghe_6","ghe_7","ghe_8"]);
+      this.sampleMap.set("Ke", ["ke","ke_2","ke_3"]);
+      this.sampleMap.set("Ka", ["tas","tas_2","tas_3"]);
+      this.sampleMap.set("Ta", ["tas","tas_2","tas_3"]);
+      this.sampleMap.set("Te", ["te","te_2","te_middlefinger","te_ne"]);
+      this.sampleMap.set("Tun", ["tun","tun_2","tun_3"]);
+      this.sampleMap.set("Tin", ["tun","tun_2"]);
+      this.sampleMap.set("Ti", ["te"]);
+      this.sampleMap.set("Dha", ["na","ghe"]);
+      this.sampleMap.set("Dhin", ["tun","ghe"]);
+
+      this.sampleMap.set("Bass", ["ghe"]);
+      this.sampleMap.set("Muted", ["ke"]);
+      this.sampleMap.set("Slap", ["tas"]);
+
+      this.samplesLoaded = true;
+
+      console.log(
+          `Loaded ${this.sampleBuffers.size} tabla samples.`
+      );
+
+  }
+
+  randomSample(bol){
+
+      const list = this.sampleMap.get(bol);
+
+      if(!list) return null;
+
+      return list[
+          Math.floor(Math.random()*list.length)
+      ];
+
+  }
+
+  playSample(sampleName, velocity = 1) {
+
+      const buffer = this.sampleBuffers.get(sampleName);
+
+      if (!buffer) return false;
+
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+
+      const gain = this.ctx.createGain();
+
+      gain.gain.value = velocity;
+
+      source.connect(gain);
+      gain.connect(this.masterGain);
+
+      source.playbackRate.value = this.playbackRate;
+
+      source.start();
+
+      return true;
+
   }
 
   get activeVoices() {
