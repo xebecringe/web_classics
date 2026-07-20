@@ -44,6 +44,49 @@ export const BOL_LIBRARY = {
 export const BOL_NAMES = Object.keys(BOL_LIBRARY);
 
 /**
+ * Instrument configuration
+ * ------------------------
+ * Centralizes the sample engine's musical behavior. Velocity layers are empty
+ * for the current single-layer pack, but can be added without changing the
+ * playback pipeline.
+ */
+const INSTRUMENT_CONFIG = {
+  defaultVelocity: 1,
+  defaultArticulation: 'normal',
+  velocity: {
+    min: 0,
+    max: 1,
+    curve: 1,
+  },
+  humanization: {
+    gainVariation: 0.03,
+    pitchVariation: 0.01,
+  },
+  defaultGain: 1,
+  defaultPan: 0,
+  sampleGains: {
+    na: 1,
+    ghe: 0.82,
+    ghe_2: 0.84,
+    ke: 1.1,
+    tun: 0.96,
+  },
+  samplePans: {
+    Ghe: -0.25,
+    Na: 0.2,
+    Tun: 0.18,
+    Ke: 0.15,
+  },
+  articulations: {
+    normal: {},
+    accent: {},
+    ghost: {},
+    muted: {},
+  },
+  velocityLayers: {},
+};
+
+/**
  * SoundPool
  * Pre-builds a reusable white-noise buffer (the only thing worth caching —
  * oscillators are cheap and must be created fresh per voice anyway) and
@@ -81,6 +124,10 @@ export class AudioEngine {
       // NEW
       this.sampleBuffers = new Map();
       this.sampleMap = new Map();
+      this.sampleShuffleBags = new Map();
+      this.lastSampleForBol = new Map();
+      this.sampleGainMap = new Map(Object.entries(INSTRUMENT_CONFIG.sampleGains));
+      this.samplePanMap = new Map(Object.entries(INSTRUMENT_CONFIG.samplePans));
       this.samplesLoaded = false;
 
       this.playbackRate = 1;
@@ -138,15 +185,19 @@ export class AudioEngine {
   }
 
   /**
-   * Play a bol by name.
+   * Main playback flow: resolve input, articulation, velocity, and samples,
+   * then apply gain, pan, and humanization before starting the voice.
    * @param {string} name - key of BOL_LIBRARY
-   * @param {number} velocity - 0..1, scales gain & slightly brightens the filter
+   * @param {number|object} velocity - 0..1, or playback options for future MIDI use
+   * @param {object} options - optional articulation and velocity-layer options
    * @returns {number} the AudioContext time the strike lands at (for latency display)
    */
-  triggerBol(name, velocity = 1) {
+  triggerBol(name, velocity = INSTRUMENT_CONFIG.defaultVelocity, options = {}) {
     if (!this.ready) return null;
     const recipe = BOL_LIBRARY[name];
     if (!recipe) return null;
+
+    const playback = this.resolvePlaybackOptions(velocity, options);
 
     // ------------------------------------------------------
     // Sample playback
@@ -154,24 +205,37 @@ export class AudioEngine {
 
     if (this.samplesLoaded) {
 
-        const sample = this.randomSample(name);
+        const samples = this.sampleMap.get(name);
 
-        if (sample) {
+        if (samples) {
 
-            const played = this.playSample(sample, velocity);
+            if (name === "Dha" || name === "Dhin") {
 
-            if (played) {
-                return this.ctx.currentTime;
+                if (this.playSamples(samples, playback, name)) {
+                    return this.ctx.currentTime;
+                }
+
             }
 
-        }
+            else {
+
+                const sample = this.getSampleForBol(name, playback);
+
+                if (sample && this.playSample(sample, playback, name)) {
+                    return this.ctx.currentTime;
+                }
+
+            }
+
+        }  
+
 
     }
 
 
     const now = this.ctx.currentTime;
     const rate = this.playbackRate;
-    const vel = clamp01(velocity);
+    const vel = playback.velocity;
 
     const voiceGain = this.ctx.createGain();
     voiceGain.gain.value = 0;
@@ -331,41 +395,188 @@ export class AudioEngine {
 
   }
 
-  randomSample(bol){
+  /** Convenience API for expressive callers; existing triggerBol() calls still work. */
+  playBol(name, options = {}) {
+      return this.triggerBol(name, options);
+  }
 
-      const list = this.sampleMap.get(bol);
+  /** Resolves velocity and articulation into one future-friendly playback context. */
+  resolvePlaybackOptions(velocity = INSTRUMENT_CONFIG.defaultVelocity, options = {}) {
+      if (typeof velocity === 'object' && velocity !== null) {
+          options = velocity;
+          velocity = options.velocity ?? INSTRUMENT_CONFIG.defaultVelocity;
+      }
+
+      const articulation = INSTRUMENT_CONFIG.articulations[options.articulation]
+          ? options.articulation
+          : INSTRUMENT_CONFIG.defaultArticulation;
+      const resolvedVelocity = this.resolveVelocity(options.velocity ?? velocity);
+
+      return {
+          velocity: resolvedVelocity,
+          articulation,
+      };
+  }
+
+  /** Applies the configurable velocity curve while keeping values within 0..1. */
+  resolveVelocity(value) {
+      const { min, max, curve } = INSTRUMENT_CONFIG.velocity;
+      const normalized = Math.max(min, Math.min(max, value));
+
+      return Math.pow(normalized, curve);
+  }
+
+  /** Resolves a future velocity layer, falling back to the current sample pack. */
+  resolveSampleSet(bol, playback) {
+      const layers = INSTRUMENT_CONFIG.velocityLayers[bol];
+
+      if (layers?.length) {
+          const layer = layers.find(({ min = 0, max = 1 }) =>
+              playback.velocity >= min && playback.velocity <= max
+          ) ?? layers[layers.length - 1];
+
+          return {
+              key: `${bol}:${layer.name}`,
+              samples: layer.samples,
+          };
+      }
+
+      return {
+          key: bol,
+          samples: this.sampleMap.get(bol),
+      };
+  }
+
+  /** Creates a shuffled bag so each variation plays once before repeating. */
+  createShuffleBag(samples) {
+      const bag = [...samples];
+
+      for (let i = bag.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [bag[i], bag[j]] = [bag[j], bag[i]];
+      }
+
+      return bag;
+  }
+
+  /** Returns the next sample variation for a bol using a per-layer shuffle bag. */
+  getSampleForBol(bol, playback = this.resolvePlaybackOptions()){
+
+      const sampleSet = this.resolveSampleSet(bol, playback);
+      const list = sampleSet.samples;
 
       if(!list) return null;
 
-      return list[
-          Math.floor(Math.random()*list.length)
-      ];
+      if (list.length === 1) return list[0];
+
+      let bag = this.sampleShuffleBags.get(sampleSet.key);
+
+      if (!bag || bag.length === 0) {
+          bag = this.createShuffleBag(list);
+
+          const lastSample = this.lastSampleForBol.get(sampleSet.key);
+          if (bag[bag.length - 1] === lastSample) {
+              const replacementIndex = bag.findIndex((sample) => sample !== lastSample);
+              [bag[bag.length - 1], bag[replacementIndex]] =
+                  [bag[replacementIndex], bag[bag.length - 1]];
+          }
+
+          this.sampleShuffleBags.set(sampleSet.key, bag);
+      }
+
+      const sample = bag.pop();
+      this.lastSampleForBol.set(sampleSet.key, sample);
+
+      return sample;
 
   }
 
-  playSample(sampleName, velocity = 1) {
+  /** Prepares the subtle per-hit variation applied to a sample. */
+  prepareSamplePlayback(sampleName, playback, bol) {
+      const { humanization, defaultGain, defaultPan } = INSTRUMENT_CONFIG;
+      const gainVariation = 1 + (Math.random() * 2 - 1) * humanization.gainVariation;
+      const pitchVariation = 1 + (Math.random() * 2 - 1) * humanization.pitchVariation;
+
+      return {
+          gain: playback.velocity * (this.sampleGainMap.get(sampleName) ?? defaultGain) * gainVariation,
+          playbackRate: this.playbackRate * pitchVariation,
+          pan: this.samplePanMap.get(bol) ?? defaultPan,
+          articulation: playback.articulation,
+      };
+  }
+
+  /** Creates the buffer source for a single sample voice. */
+  createSampleSource(buffer, playbackRate) {
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.playbackRate.value = playbackRate;
+
+      return source;
+  }
+
+  /** Creates a stereo panner when the browser supports it. */
+  createSamplePanner(pan) {
+      if (!this.ctx.createStereoPanner) return null;
+
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = pan;
+
+      return panner;
+  }
+
+  /** Routes a sample voice through gain, optional panning, and the master output. */
+  routeSample(source, gain, panner) {
+      source.connect(gain);
+
+      if (panner) {
+          gain.connect(panner);
+          panner.connect(this.masterGain);
+          return;
+      }
+
+      gain.connect(this.masterGain);
+  }
+
+  playSample(sampleName, velocity = INSTRUMENT_CONFIG.defaultVelocity, bol = sampleName) {
 
       const buffer = this.sampleBuffers.get(sampleName);
 
       if (!buffer) return false;
 
-      const source = this.ctx.createBufferSource();
-      source.buffer = buffer;
-
+      const playback = this.prepareSamplePlayback(
+          sampleName,
+          this.resolvePlaybackOptions(velocity),
+          bol
+      );
+      const source = this.createSampleSource(buffer, playback.playbackRate);
       const gain = this.ctx.createGain();
+      gain.gain.value = playback.gain;
+      const panner = this.createSamplePanner(playback.pan);
 
-      gain.gain.value = velocity;
-
-      source.connect(gain);
-      gain.connect(this.masterGain);
-
-      source.playbackRate.value = this.playbackRate;
+      this.routeSample(source, gain, panner);
 
       source.start();
 
       return true;
 
   }
+
+  playSamples(sampleNames, velocity = INSTRUMENT_CONFIG.defaultVelocity, bol) {
+
+      let played = false;
+
+      for (const sample of sampleNames) {
+
+          if (this.playSample(sample, velocity, bol)) {
+              played = true;
+          }
+
+      }
+
+      return played;
+
+  }
+
 
   get activeVoices() {
     return this._activeVoices;
